@@ -32,7 +32,7 @@ async fn main() {
         .with_state(model);
 
     // Указываем адрес и порт
-    let addr = "0.0.0.0:3000";
+    let addr = "0.0.0.0:3001";
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 
     println!("Index Service (Axum 0.8) is running on http://{}", addr);

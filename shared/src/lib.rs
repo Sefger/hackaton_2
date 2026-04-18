@@ -67,10 +67,6 @@ pub struct IndexAPIResponse {
     pub results: Vec<IndexAPIResultItem>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SparseEmbeddingRequest {
-    pub texts: Vec<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SparseVector {
@@ -127,4 +123,9 @@ pub struct SearchAPIResultItem {
 #[derive(Debug, Serialize)]
 pub struct SearchAPIResponse {
     pub results: Vec<SearchAPIResultItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)] // Обязательно добавь Serialize сюда
+pub struct SparseEmbeddingRequest {
+    pub texts: Vec<String>,
 }

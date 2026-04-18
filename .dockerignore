@@ -1,0 +1,6 @@
+# Rust — это самое важное!
+target/
+
+# Git
+.git/
+.gitignore

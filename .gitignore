@@ -1,2 +1,4 @@
 /target
 .idea
+*.json
+.fastembed_cache/

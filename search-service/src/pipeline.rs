@@ -1,112 +1,110 @@
-use std::sync::Arc;
 use crate::AppState;
-use shared::{IndexAPIDataItem, Message, SparseEmbeddingRequest, SparseEmbeddingResponse};
-use qdrant_client::qdrant::{PointStruct, UpsertPointsBuilder, PointId};
-use qdrant_client::Payload;
-use anyhow::{Context, Result};
-use uuid::Uuid;
+use shared::{Question, SearchAPIResponse, SearchAPIResultItem, SparseEmbeddingRequest, SparseEmbeddingResponse};
+use std::sync::Arc;
+use std::collections::HashSet;
+use serde_json::json;
+use qdrant_client::qdrant::{SearchPoints, value::Kind};
 
-/// Основной конвейер индексации сообщений
-pub struct IndexingPipeline {
-    state: Arc<AppState>,
+pub async fn execute_search_pipeline(state: Arc<AppState>, question: Question) -> SearchAPIResponse {
+    // В shared/lib.rs доступно поле search_text
+    let query_text = &question.search_text;
+
+    // 1. Получаем Dense вектор (через внешний API)
+    let dense_vec = fetch_dense_vector(&state, query_text).await;
+
+    // 2. Поиск в Qdrant
+    // Используем переменную окружения для имени вектора (из ТЗ)
+    let dense_vector_name = std::env::var("QDRANT_DENSE_VECTOR_NAME").unwrap_or_default();
+
+    let search_result = state.qdrant.search_points(SearchPoints {
+        collection_name: state.collection_name.clone(),
+        vector: dense_vec,
+        vector_name: Some(dense_vector_name),
+        limit: 100, // Запас для реранкера
+        with_payload: Some(true.into()),
+        ..Default::default()
+    }).await.expect("Qdrant search failed");
+
+    // 3. Reranking
+    let final_ids = rerank_points(&state, query_text, search_result.result).await;
+
+    SearchAPIResponse {
+        results: vec![SearchAPIResultItem { message_ids: final_ids }]
+    }
 }
 
-impl IndexingPipeline {
-    pub fn new(state: Arc<AppState>) -> Self {
-        Self { state }
-    }
+async fn rerank_points(state: &AppState, query: &str, points: Vec<qdrant_client::qdrant::ScoredPoint>) -> Vec<String> {
+    let mut candidates = Vec::new();
 
-    /// Запускает процесс преобразования сообщений в векторы и их сохранение
-    pub async fn run(&self, data: IndexAPIDataItem) -> Result<()> {
-        let chat_id = data.chat.id.clone();
+    for p in points {
+        // Безопасное извлечение текста чанка из Protobuf Payload
+        let text = p.payload.get("page_content")
+            .and_then(|v| v.kind.as_ref())
+            .and_then(|k| match k {
+                Kind::StringValue(s) => Some(s.clone()),
+                _ => None
+            }).unwrap_or_default();
 
-        // 1. Подготовка текстов для эмбеддинга
-        // Используем форматирование, специфичное для модели BGE-M3 (контекст отправителя)
-        let texts: Vec<String> = data.new_messages
-            .iter()
-            .map(|m| self.format_message_for_index(m))
-            .collect();
-
-        if texts.is_empty() {
-            return Ok(());
+        // Извлечение списка ID сообщений из чанка
+        let mut ids = Vec::new();
+        if let Some(val) = p.payload.get("message_ids") {
+            if let Some(Kind::ListValue(list)) = &val.kind {
+                for item in &list.values {
+                    if let Some(Kind::StringValue(s)) = &item.kind {
+                        ids.push(s.clone());
+                    }
+                }
+            }
         }
-
-        // 2. Запрос разреженных (sparse) векторов у Index Service
-        let embedding_data = self.fetch_embeddings(texts).await?;
-
-        // 3. Формирование точек (Points) для векторной БД
-        let points = self.build_points(&chat_id, &data.new_messages, embedding_data)?;
-
-        // 4. Пакетная вставка в Qdrant (коллекция "messages")
-        self.state.qdrant
-            .upsert_points(UpsertPointsBuilder::new("messages", points).wait(true))
-            .await
-            .context("Failed to upsert points to Qdrant")?;
-
-        Ok(())
+        candidates.push((text, ids));
     }
 
-    /// Взаимодействие с внешним сервисом эмбеддингов
-    async fn fetch_embeddings(&self, texts: Vec<String>) -> Result<SparseEmbeddingResponse> {
-        let index_url = format!("{}/sparse_embedding", self.state.index_service_url);
+    if candidates.is_empty() { return vec![]; }
 
-        let resp = self.state.http_client
-            .post(&index_url)
-            .json(&SparseEmbeddingRequest { texts })
-            .send()
-            .await
-            .context("Failed to connect to index-service")?;
+    // Запрос к RERANKER_URL
+    let rerank_payload = json!({
+        "query": query,
+        "documents": candidates.iter().map(|c| &c.0).collect::<Vec<_>>()
+    });
 
-        if !resp.status().is_success() {
-            let error_msg = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("Index-service returned error: {}", error_msg));
+    let resp = state.http_client.post(&state.reranker_url)
+        .header("Authorization", format!("Bearer {}", state.api_key))
+        .json(&rerank_payload)
+        .send().await.unwrap()
+        .json::<serde_json::Value>().await.unwrap();
+
+    let mut final_message_ids = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    // Обработка результатов реранкера (обычно возвращает массив индексов)
+    if let Some(results) = resp["results"].as_array() {
+        for res in results {
+            let idx = res["index"].as_u64().unwrap() as usize;
+            if idx < candidates.len() {
+                for id in &candidates[idx].1 {
+                    if seen.insert(id.clone()) {
+                        final_message_ids.push(id.clone());
+                    }
+                }
+            }
         }
-
-        resp.json::<SparseEmbeddingResponse>()
-            .await
-            .context("Failed to parse sparse embeddings response")
     }
 
-    /// Преобразование сообщений и векторов в структуру Qdrant
-    fn build_points(
-        &self,
-        chat_id: &str,
-        messages: &[Message],
-        embeddings: SparseEmbeddingResponse
-    ) -> Result<Vec<PointStruct>> {
-        let mut points = Vec::with_capacity(messages.len());
+    // Возвращаем ТОП-50 согласно критериям оценки
+    final_message_ids.into_iter().take(50).collect()
+}
 
-        for (idx, msg) in messages.iter().enumerate() {
-            let sparse_vec = embeddings.vectors.get(idx)
-                .context("Embedding vector index out of bounds")?;
+async fn fetch_dense_vector(state: &AppState, text: &str) -> Vec<f32> {
+    let resp = state.http_client.post(&state.dense_url)
+        .header("Authorization", format!("Bearer {}", state.api_key))
+        .json(&json!({ "input": text }))
+        .send().await.unwrap()
+        .json::<serde_json::Value>().await.unwrap();
 
-            let mut payload = Payload::new();
-            payload.insert("chat_id", chat_id.to_string());
-            payload.insert("message_id", msg.id.clone());
-            payload.insert("text", msg.text.clone());
-            payload.insert("sender_id", msg.sender_id.clone());
-            // Храним ID как список для совместимости с будущей логикой поиска по чанкам
-            payload.insert("message_ids", vec![msg.id.clone()]);
-
-            // Генерация PointId: пытаемся использовать UUID сообщения из базы,
-            // если формат не совпадает — генерируем случайный v4
-            let point_id: PointId = Uuid::parse_str(&msg.id)
-                .map(|u| PointId::from(u.to_string()))
-                .unwrap_or_else(|_| PointId::from(Uuid::new_v4().to_string()));
-
-            points.push(PointStruct::new(
-                point_id,
-                sparse_vec.values.clone(),
-                payload
-            ));
-        }
-
-        Ok(points)
-    }
-
-    /// Форматирование сообщения для улучшения семантического поиска
-    fn format_message_for_index(&self, msg: &Message) -> String {
-        // Добавление "User {id}" помогает модели различать участников диалога
-        format!("User {}: {}", msg.sender_id, msg.text.trim())
-    }
+    // Извлекаем массив f32
+    resp["data"][0]["embedding"].as_array()
+        .expect("Invalid dense embedding response")
+        .iter()
+        .map(|v| v.as_f64().unwrap() as f32)
+        .collect()
 }

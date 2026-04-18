@@ -1,3 +1,4 @@
+mod pipeline;
 use axum::{
     routing::get,
     Router,
@@ -31,7 +32,11 @@ async fn main() {
 
     axum::serve(listener, app).await.unwrap();
 }
-
+pub struct AppState { // Добавь pub
+    pub qdrant: qdrant_client::Qdrant,
+    pub index_service_url: String,
+    pub http_client: reqwest::Client,
+}
 async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }

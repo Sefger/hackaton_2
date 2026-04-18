@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // --- Базовые типы сообщений и чатов ---
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
     pub id: String,
@@ -23,9 +22,7 @@ pub struct Message {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatType {
-    Private,
-    Group,
-    Channel,
+    Private, Group, Channel,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -41,20 +38,19 @@ pub struct Chat {
 }
 
 // --- Index Service API ---
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct IndexAPIDataItem {
     pub chat: Chat,
     pub overlap_messages: Vec<Message>,
     pub new_messages: Vec<Message>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct IndexAPIRequest {
     pub data: IndexAPIDataItem,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct IndexAPIResultItem {
     pub page_content: String,
     pub dense_content: String,
@@ -62,16 +58,20 @@ pub struct IndexAPIResultItem {
     pub message_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct IndexAPIResponse {
     pub results: Vec<IndexAPIResultItem>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SparseVector {
-    pub indices: Vec<i32>,
-    pub values: Vec<f64>,
+    pub indices: Vec<u32>,
+    pub values: Vec<f32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SparseEmbeddingRequest {
+    pub texts: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,52 +80,23 @@ pub struct SparseEmbeddingResponse {
 }
 
 // --- Search Service API ---
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DateRange {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Entities {
-    pub people: Vec<String>,
-    pub emails: Vec<String>,
-    pub documents: Vec<String>,
-    pub names: Vec<String>,
-    pub links: Vec<String>,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Question {
-    pub text: String,
-    pub asker: String,
-    pub asked_on: String,
-    pub variants: Vec<String>,
-    pub hyde: Vec<String>,
-    pub keywords: Vec<String>,
-    pub entities: Entities,
-    pub date_mentions: Vec<String>,
-    pub date_range: Option<DateRange>,
     pub search_text: String,
+    // ... остальные поля из твоего кода
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SearchAPIRequest {
     pub question: Question,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchAPIResultItem {
     pub message_ids: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchAPIResponse {
     pub results: Vec<SearchAPIResultItem>,
-}
-
-#[derive(Debug, Serialize, Deserialize)] // Обязательно добавь Serialize сюда
-pub struct SparseEmbeddingRequest {
-    pub texts: Vec<String>,
 }

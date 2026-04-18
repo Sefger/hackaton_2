@@ -1,8 +1,20 @@
-use shared::{Message, IndexAPIResultItem};
+use shared::{Message, IndexAPIResultItem, IndexAPIDataItem};
 
 pub struct ChunkerConfig {
     pub window_size: usize, // Сколько сообщений в одном чанке
     pub overlap: usize,    // Сколько сообщений перекрывается с предыдущим
+}
+
+/// Точка входа для handlers.rs
+pub fn process_to_chunks(data: IndexAPIDataItem) -> Vec<IndexAPIResultItem> {
+    // Настраиваем параметры окна.
+    // Можно вынести в конфиг сервиса, но для начала хватит констант.
+    let config = ChunkerConfig {
+        window_size: 20, // Берем по 20 сообщений
+        overlap: 5,      // 5 сообщений перекрытия для сохранения контекста
+    };
+
+    create_chunks(&data.new_messages, &data.overlap_messages, &config)
 }
 
 pub fn create_chunks(
@@ -22,45 +34,41 @@ pub fn create_chunks(
     let mut results = Vec::new();
     let mut i = 0;
 
-    while i < all_messages.to_vec().len() {
+    // Оптимизация: убрали лишний .to_vec() в цикле
+    while i < all_messages.len() {
         let end = (i + config.window_size).min(all_messages.len());
         let chunk_msgs = &all_messages[i..end];
 
         if chunk_msgs.is_empty() { break; }
 
-        // Формируем текстовое представление чанка
         let mut page_content = String::new();
         let mut message_ids = Vec::new();
 
         for msg in chunk_msgs {
-            // Добавляем ID сообщения в список покрытия
             message_ids.push(msg.id.clone());
-
-            // Форматируем строку: "Отправитель: Текст"
-            // Это помогает Dense-модели лучше понимать диалог
             let line = format!("{}: {}\n", msg.sender_id, msg.text.trim());
             page_content.push_str(&line);
         }
 
         results.push(IndexAPIResultItem {
-            // В базовом варианте делаем все контенты одинаковыми
-            // Но в будущем dense_content можно обогатить метаданными чата
             dense_content: page_content.clone(),
             sparse_content: page_content.clone(),
             page_content,
             message_ids,
         });
 
-        // Условие выхода и сдвиг окна
         if end == all_messages.len() { break; }
-        i += config.window_size - config.overlap;
 
-        // Защита от вечного цикла, если overlap >= window_size
-        if config.overlap >= config.window_size { i += 1; }
+        // Сдвиг окна
+        let step = if config.window_size > config.overlap {
+            config.window_size - config.overlap
+        } else {
+            1
+        };
+        i += step;
     }
 
-    // ВАЖНО: Тестирующая система ожидает чанки только для НОВЫХ сообщений.
-    // Фильтруем чанки, которые не содержат ни одного ID из new_messages.
+    // Фильтруем: оставляем только те чанки, где есть хотя бы одно НОВОЕ сообщение
     let new_ids: std::collections::HashSet<_> = new_messages.iter().map(|m| &m.id).collect();
     results.into_iter()
         .filter(|chunk| chunk.message_ids.iter().any(|id| new_ids.contains(id)))

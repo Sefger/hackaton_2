@@ -16,3 +16,4 @@ qdrant-client = "1"
 
 shared = { path = "../shared" }
 fastembed = { workspace = true }
+uuid = {workspace = true}

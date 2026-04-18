@@ -1,0 +1,10 @@
+[package]
+name = "shared"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+fastembed = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }

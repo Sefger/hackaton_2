@@ -1,0 +1,12 @@
+node_modules
+.svelte-kit
+.cursor
+package-lock.json
+package.json
+static
+svelte.config.js
+tailwind.config.ts
+tsconfig.json
+vite.config.ts
+postcss.config.js
+prettier.config.js

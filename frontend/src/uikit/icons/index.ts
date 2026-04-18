@@ -1,0 +1,6 @@
+export {default as SearchIcon} from "./SearchIcon.svelte"
+export {default as DocIcon} from "./DocIcon.svelte"
+export {default as UserIcon} from "./UserIcon.svelte"
+export {default as GadgetIcon} from "./GadgetIcon.svelte"
+export {default as CloseIcon} from "./CloseIcon.svelte"
+export * from "./types"

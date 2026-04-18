@@ -1,0 +1,35 @@
+{
+  "search": {
+    "placeholder": "Поиск по кластеру...",
+    "noPreview": "Нет предпросмотра для этого типа",
+    "detailsTitle": "Детали объекта"
+  },
+  "results": {
+    "document": {
+      "type": "Документ",
+      "unknownSize": "Размер неизвестен",
+      "unknownAuthor": "Система",
+      "openAction": "Открыть",
+      "downloadAction": "Скачать файл",
+      "authorLabel": "Автор",
+      "modifiedLabel": "Изменен",
+      "modifiedRecently": "Недавно",
+      "descriptionLabel": "Описание"
+    },
+    "person": {
+      "type": "Сотрудник",
+      "unknownDepartment": "Общий отдел",
+      "profileAction": "Профиль",
+      "sendMessage": "Написать сообщение",
+      "viewProfile": "Просмотреть профиль",
+      "skillsLabel": "Навыки и экспертиза"
+    }
+  },
+  "filters": {
+    "documents": "Документы",
+    "people": "Люди",
+    "calendar": "Календарь",
+    "messages": "Сообщения",
+    "devTools": "Инструменты"
+  }
+}

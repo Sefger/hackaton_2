@@ -22,7 +22,9 @@ pub struct Message {
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatType {
-    Private, Group, Channel,
+    Private,
+    Group,
+    Channel,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

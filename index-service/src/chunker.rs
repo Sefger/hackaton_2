@@ -1,10 +1,12 @@
-use shared::{Message, IndexAPIResultItem, IndexAPIDataItem};
+use shared::{IndexAPIDataItem, IndexAPIResultItem, Message};
 
+#[allow(dead_code)]
 pub struct ChunkerConfig {
     pub window_size: usize, // Сколько сообщений в одном чанке
-    pub overlap: usize,    // Сколько сообщений перекрывается с предыдущим
+    pub overlap: usize,     // Сколько сообщений перекрывается с предыдущим
 }
 
+#[allow(dead_code)]
 /// Точка входа для handlers.rs
 pub fn process_to_chunks(data: IndexAPIDataItem) -> Vec<IndexAPIResultItem> {
     // Настраиваем параметры окна.
@@ -39,7 +41,9 @@ pub fn create_chunks(
         let end = (i + config.window_size).min(all_messages.len());
         let chunk_msgs = &all_messages[i..end];
 
-        if chunk_msgs.is_empty() { break; }
+        if chunk_msgs.is_empty() {
+            break;
+        }
 
         let mut page_content = String::new();
         let mut message_ids = Vec::new();
@@ -57,7 +61,9 @@ pub fn create_chunks(
             message_ids,
         });
 
-        if end == all_messages.len() { break; }
+        if end == all_messages.len() {
+            break;
+        }
 
         // Сдвиг окна
         let step = if config.window_size > config.overlap {
@@ -70,7 +76,8 @@ pub fn create_chunks(
 
     // Фильтруем: оставляем только те чанки, где есть хотя бы одно НОВОЕ сообщение
     let new_ids: std::collections::HashSet<_> = new_messages.iter().map(|m| &m.id).collect();
-    results.into_iter()
+    results
+        .into_iter()
         .filter(|chunk| chunk.message_ids.iter().any(|id| new_ids.contains(id)))
         .collect()
 }

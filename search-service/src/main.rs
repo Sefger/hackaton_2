@@ -1,15 +1,14 @@
 mod pipeline;
 
 use axum::{
-    routing::{get, post},
-    Router,
     extract::State,
-    Json,
+    routing::{get, post},
+    Json, Router,
 };
+use qdrant_client::Qdrant;
+use shared::{SearchAPIRequest, SearchAPIResponse};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use shared::{SearchAPIRequest, SearchAPIResponse};
-use qdrant_client::Qdrant;
 
 // Единая структура состояния приложения
 pub struct AppState {
@@ -32,7 +31,8 @@ async fn main() {
     let qdrant_url = std::env::var("QDRANT_URL").expect("QDRANT_URL not set");
     let dense_url = std::env::var("EMBEDDINGS_DENSE_URL").expect("EMBEDDINGS_DENSE_URL not set");
     let reranker_url = std::env::var("RERANKER_URL").expect("RERANKER_URL not set");
-    let collection_name = std::env::var("QDRANT_COLLECTION_NAME").expect("QDRANT_COLLECTION_NAME not set");
+    let collection_name =
+        std::env::var("QDRANT_COLLECTION_NAME").expect("QDRANT_COLLECTION_NAME not set");
 
     // Инициализация клиента Qdrant
     // В версии qdrant-client 1.10+ используется .api_key()

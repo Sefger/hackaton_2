@@ -1,19 +1,22 @@
 use crate::AppState;
-use shared::{Question, SearchAPIResponse, SearchAPIResultItem};
-use std::sync::Arc;
-use std::collections::HashSet;
+use qdrant_client::qdrant::{value::Kind, SearchPoints};
 use serde_json::json;
-use qdrant_client::qdrant::{SearchPoints, value::Kind, Vector};
+use shared::{Question, SearchAPIResponse, SearchAPIResultItem};
+use std::collections::HashSet;
+use std::sync::Arc;
 
-pub async fn execute_search_pipeline(state: Arc<AppState>, question: Question) -> SearchAPIResponse {
+pub async fn execute_search_pipeline(
+    state: Arc<AppState>,
+    question: Question,
+) -> SearchAPIResponse {
     let query_text = &question.search_text;
 
     // 1. Получаем Dense вектор (через внешний API)
     let dense_vec = fetch_dense_vector(&state, query_text).await;
 
     // 2. Поиск в Qdrant
-    let dense_vector_name = std::env::var("QDRANT_DENSE_VECTOR_NAME")
-        .unwrap_or_else(|_| "dense".to_string());
+    let dense_vector_name =
+        std::env::var("QDRANT_DENSE_VECTOR_NAME").unwrap_or_else(|_| "dense".to_string());
 
     // Формируем запрос к Qdrant (исправлено под Protobuf структуры)
     let search_points = SearchPoints {
@@ -25,7 +28,8 @@ pub async fn execute_search_pipeline(state: Arc<AppState>, question: Question) -
         ..Default::default()
     };
 
-    let search_result = state.qdrant
+    let search_result = state
+        .qdrant
         .search_points(search_points)
         .await
         .expect("Qdrant search failed");
@@ -34,24 +38,28 @@ pub async fn execute_search_pipeline(state: Arc<AppState>, question: Question) -
     let final_ids = rerank_points(&state, query_text, search_result.result).await;
 
     SearchAPIResponse {
-        results: vec![SearchAPIResultItem { message_ids: final_ids }]
+        results: vec![SearchAPIResultItem {
+            message_ids: final_ids,
+        }],
     }
 }
 
 async fn rerank_points(
     state: &AppState,
     query: &str,
-    points: Vec<qdrant_client::qdrant::ScoredPoint>
+    points: Vec<qdrant_client::qdrant::ScoredPoint>,
 ) -> Vec<String> {
     let mut candidates = Vec::new();
 
     for p in points {
         // Безопасное извлечение текста чанка
-        let text = p.payload.get("page_content")
+        let text = p
+            .payload
+            .get("page_content")
             .and_then(|v| v.kind.as_ref())
             .and_then(|k| match k {
                 Kind::StringValue(s) => Some(s.clone()),
-                _ => None
+                _ => None,
             })
             .unwrap_or_default();
 
@@ -65,17 +73,19 @@ async fn rerank_points(
                             ids.push(s.clone());
                         }
                     }
-                },
+                }
                 Some(Kind::StringValue(s)) => {
                     ids.push(s.clone());
-                },
+                }
                 _ => {}
             }
         }
         candidates.push((text, ids));
     }
 
-    if candidates.is_empty() { return vec![]; }
+    if candidates.is_empty() {
+        return vec![];
+    }
 
     // Запрос к Reranker API
     let rerank_payload = json!({
@@ -83,7 +93,9 @@ async fn rerank_points(
         "documents": candidates.iter().map(|c| &c.0).collect::<Vec<_>>()
     });
 
-    let resp = state.http_client.post(&state.reranker_url)
+    let resp = state
+        .http_client
+        .post(&state.reranker_url)
         .header("Authorization", format!("Bearer {}", state.api_key))
         .json(&rerank_payload)
         .send()
@@ -121,7 +133,9 @@ async fn rerank_points(
 }
 
 async fn fetch_dense_vector(state: &AppState, text: &str) -> Vec<f32> {
-    let resp = state.http_client.post(&state.dense_url)
+    let resp = state
+        .http_client
+        .post(&state.dense_url)
         .header("Authorization", format!("Bearer {}", state.api_key))
         .json(&json!({ "input": text }))
         .send()
@@ -136,7 +150,8 @@ async fn fetch_dense_vector(state: &AppState, text: &str) -> Vec<f32> {
         data[0]["embedding"].as_array()
     } else {
         resp.as_array()
-    }.expect("Invalid dense embedding format");
+    }
+    .expect("Invalid dense embedding format");
 
     embedding_json
         .iter()

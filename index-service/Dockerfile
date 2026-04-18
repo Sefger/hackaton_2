@@ -1,7 +1,8 @@
-# ====================== Builder stage ======================
-FROM rust:1.94-slim-bookworm AS builder
+# syntax=docker/dockerfile:1.6
 
-# Устанавливаем системные зависимости для сборки (openssl + pkg-config)
+# ====================== Builder stage ======================
+FROM rust:1.94-trixie AS builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
@@ -9,32 +10,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Копируем workspace файлы
+# Копируем весь workspace (manifest'ы + реальные исходники)
 COPY Cargo.toml Cargo.lock ./
-
-# Копируем Cargo.toml всех членов workspace
-COPY shared/Cargo.toml ./shared/
-COPY index-service/Cargo.toml ./index-service/
-COPY search-service/Cargo.toml ./search-service/
-
-# Создаём заглушки для всех пакетов (чтобы Cargo не ругался)
-RUN mkdir -p shared/src index-service/src search-service/src \
-    && echo "pub fn dummy() {}" > shared/src/lib.rs \
-    && echo "fn main() { println!(\"dummy\"); }" > index-service/src/main.rs \
-    && echo "fn main() { println!(\"dummy\"); }" > search-service/src/main.rs
-
-# Кэшируем зависимости — собираем только index-service
-RUN cargo build --release --package index-service
-
-# Копируем реальный исходный код
 COPY shared ./shared
 COPY index-service ./index-service
+COPY search-service ./search-service
 
-# Финальная пересборка с реальным кодом
-RUN cargo build --release --package index-service
+# Собираем только нужный пакет.
+# Используем cache mount'ы для registry и target — так зависимости переиспользуются
+# между сборками без трюков с dummy main.rs.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --package index-service \
+    && cp /app/target/release/index-service /usr/local/bin/index-service
 
 # ====================== Runtime stage ======================
-FROM ubuntu:24.04
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -42,8 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Копируем собранный бинарник
-COPY --from=builder /app/target/release/index-service /app/index-service
+COPY --from=builder /usr/local/bin/index-service /app/index-service
 
 # Папка для моделей fastembed (sparse embedding)
 RUN mkdir -p /root/.cache/huggingface/hub

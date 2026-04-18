@@ -1,9 +1,15 @@
-use axum::{extract::{State, Json}, response::IntoResponse};
+use axum::{
+    extract::{Json, State},
+    response::IntoResponse,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use shared::{IndexAPIRequest, IndexAPIResponse, IndexAPIResultItem, SparseEmbeddingRequest, SparseEmbeddingResponse, SparseVector};
-use fastembed::{SparseTextEmbedding, SparseInitOptions, SparseModel}; // Импортируем именно SparseModel
+use fastembed::{SparseInitOptions, SparseModel, SparseTextEmbedding}; // Импортируем именно SparseModel
+use shared::{
+    IndexAPIRequest, IndexAPIResponse, IndexAPIResultItem, SparseEmbeddingRequest,
+    SparseEmbeddingResponse, SparseVector,
+};
 use std::path::PathBuf;
 pub fn init_sparse_model() -> SparseTextEmbedding {
     let model_path = PathBuf::from("/app/models");
@@ -27,7 +33,8 @@ pub async fn handle_index(Json(payload): Json<IndexAPIRequest>) -> impl IntoResp
     // Группируем сообщения для сохранения контекста (Chunking)
     for chunk in messages.chunks(10) {
         let message_ids: Vec<String> = chunk.iter().map(|m| m.id.clone()).collect();
-        let combined_text: String = chunk.iter()
+        let combined_text: String = chunk
+            .iter()
             .map(|m| format!("{}: {}", m.sender_id, m.text))
             .collect::<Vec<_>>()
             .join("\n");
@@ -54,13 +61,20 @@ pub async fn handle_sparse_embedding(
     // Используем метод .embed() из того кода, что ты прислал
     match model_lock.embed(payload.texts, None) {
         Ok(embeddings) => {
-            let vectors = embeddings.into_iter().map(|e| SparseVector {
-                // В твоем lib.rs indices: Vec<u32>, а в fastembed это Vec<usize>
-                indices: e.indices.into_iter().map(|i| i as u32).collect(),
-                values: e.values,
-            }).collect();
+            let vectors = embeddings
+                .into_iter()
+                .map(|e| SparseVector {
+                    // В твоем lib.rs indices: Vec<u32>, а в fastembed это Vec<usize>
+                    indices: e.indices.into_iter().map(|i| i as u32).collect(),
+                    values: e.values,
+                })
+                .collect();
             Json(SparseEmbeddingResponse { vectors }).into_response()
-        },
-        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Embedding Error").into_response()
+        }
+        Err(_) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "Embedding Error",
+        )
+            .into_response(),
     }
 }

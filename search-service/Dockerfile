@@ -1,7 +1,8 @@
-# ====================== Builder stage ======================
-FROM rust:1.94-slim-bookworm AS builder
+# syntax=docker/dockerfile:1.6
 
-# Устанавливаем необходимые системные пакеты
+# ====================== Builder stage ======================
+FROM rust:1.94-trixie AS builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
@@ -9,31 +10,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Копируем workspace
+# Копируем весь workspace (manifest'ы + реальные исходники)
 COPY Cargo.toml Cargo.lock ./
-
-COPY shared/Cargo.toml ./shared/
-COPY index-service/Cargo.toml ./index-service/
-COPY search-service/Cargo.toml ./search-service/
-
-# Заглушки для всех членов workspace
-RUN mkdir -p shared/src index-service/src search-service/src \
-    && echo "pub fn dummy() {}" > shared/src/lib.rs \
-    && echo "fn main() { println!(\"dummy\"); }" > index-service/src/main.rs \
-    && echo "fn main() { println!(\"dummy\"); }" > search-service/src/main.rs
-
-# Кэшируем зависимости
-RUN cargo build --release --package search-service
-
-# Копируем реальный код
 COPY shared ./shared
+COPY index-service ./index-service
 COPY search-service ./search-service
 
-# Финальная сборка
-RUN cargo build --release --package search-service
+# Собираем только search-service.
+# Cache mount'ы кэшируют registry и target — дают инкрементальные сборки без stub'ов.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --package search-service \
+    && cp /app/target/release/search-service /usr/local/bin/search-service
 
 # ====================== Runtime stage ======================
-FROM ubuntu:24.04
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -41,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/search-service /app/search-service
+COPY --from=builder /usr/local/bin/search-service /app/search-service
 
 RUN mkdir -p /root/.cache/huggingface/hub
 

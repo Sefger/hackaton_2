@@ -1,5 +1,5 @@
 use axum::{routing::get, Router};
-use std::net::SocketAddr;
+
 
 #[tokio::main]
 async fn main() {
@@ -7,11 +7,9 @@ async fn main() {
 
     let app = Router::new().route("/health", get(|| async { "OK" }));
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("Index Service listening on {}", addr);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    println!("Search Service listening on {}", listener.local_addr().unwrap());
+
+    axum::serve(listener, app).await.unwrap();
 }

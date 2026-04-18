@@ -1,49 +1,44 @@
-mod handlers;
-mod pipeline;
-
 use axum::{
-    routing::{get, post},
+    routing::get,
     Router,
+    response::IntoResponse,
+    Json,
+    http::StatusCode,
 };
-use std::sync::Arc;
-use qdrant_client::Qdrant;
-
-pub struct AppState {
-    pub qdrant: Qdrant,
-    pub index_service_url: String,
-    pub http_client: reqwest::Client,
-}
+use std::net::SocketAddr;
+use serde_json::json;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    // Берем URL из переменных окружения (важно для Docker)
-    let qdrant_url = std::env::var("QDRANT_URL").unwrap_or("http://localhost:6334".into());
-    let index_url = std::env::var("INDEX_SERVICE_URL").unwrap_or("http://localhost:3000".into());
-
-    let qdrant = Qdrant::from_url(&qdrant_url)
-        .build()
-        .expect("Failed to connect to Qdrant");
-
-    let state = Arc::new(AppState {
-        qdrant,
-        index_service_url: index_url,
-        http_client: reqwest::Client::new(),
-    });
-
     let app = Router::new()
-        .route("/health", get(|| async { "OK" }))
-        // Фронтенд шлет данные сюда для поиска
-        .route("/search", post(handlers::handle_search))
-        // Фронтенд шлет данные сюда для добавления в базу (Pipeline)
-        .route("/index", post(handlers::handle_index))
-        .with_state(state);
+        .route("/health", get(health_handler))
+        .route("/search", axum::routing::post(search_handler));
 
-    // Порт 3001 для поиска
-    let addr = "0.0.0.0:3001";
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()
+        .unwrap_or(8080);
+
+    let addr = format!("{}:{}", host, port).parse::<SocketAddr>().unwrap();
+
+    println!("🚀 Search Service listening on {}", addr);
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     println!("Search Service running on http://{}", addr);
 
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn health_handler() -> impl IntoResponse {
+    (StatusCode::OK, "OK")
+}
+
+async fn search_handler() -> impl IntoResponse {
+    // Пока заглушка
+    Json(json!({
+        "results": []
+    }))
 }

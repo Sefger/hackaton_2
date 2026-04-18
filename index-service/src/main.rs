@@ -1,32 +1,52 @@
-mod chunker;
-mod handlers;
-
 use axum::{
-    routing::{get, post},
+    routing::get,
     Router,
+    response::IntoResponse,
+    Json,
+    http::StatusCode,
 };
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::net::SocketAddr;
+use serde_json::json;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
-    println!("Initializing Index Service (Port 3000)...");
-
-    // Инициализация модели BGE-M3 (через fastembed)
-    let model = Arc::new(Mutex::new(handlers::init_sparse_model()));
-
     let app = Router::new()
-        .route("/health", get(|| async { "OK" }))
-        .route("/index", post(handlers::handle_index))
-        .route("/sparse_embedding", post(handlers::handle_sparse_embedding))
-        .with_state(model);
+        .route("/health", get(health_handler))
+        .route("/index", axum::routing::post(index_handler))
+        .route("/sparse_embedding", axum::routing::post(sparse_embedding_handler));
 
-    // ВАЖНО: Порт 3000 для индексации
-    let addr = "0.0.0.0:3000";
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()
+        .unwrap_or(8080);
+
+    let addr = format!("{}:{}", host, port).parse::<SocketAddr>().unwrap();
+
+    println!("🚀 Index Service listening on {}", addr);
+
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    println!("Search Service running on http://{}", addr);
 
-    println!("Index Service is running on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn health_handler() -> impl IntoResponse {
+    (StatusCode::OK, "OK")
+}
+
+async fn index_handler() -> impl IntoResponse {
+    // Пока заглушка
+    Json(json!({
+        "results": []
+    }))
+}
+
+async fn sparse_embedding_handler() -> impl IntoResponse {
+    // Пока заглушка
+    Json(json!({
+        "vectors": []
+    }))
 }

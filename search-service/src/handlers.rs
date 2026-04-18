@@ -1,16 +1,14 @@
 use axum::{extract::State, Json, response::IntoResponse};
 use std::sync::Arc;
 use crate::AppState;
-use shared::{
-    SearchAPIRequest, SearchAPIResponse, SearchAPIResultItem,
-    SparseEmbeddingRequest, SparseEmbeddingResponse
-};
+use shared::{IndexAPIRequest, SearchAPIRequest, SearchAPIResponse, SearchAPIResultItem, SparseEmbeddingRequest, SparseEmbeddingResponse};
 // Импортируем типы для работы с результатами и gRPC-значениями
 use qdrant_client::qdrant::{
     SearchPoints,
     SearchResponse as QdrantSearchResponse,
     value::Kind
 };
+use crate::pipeline::IndexingPipeline;
 
 pub async fn handle_search(
     State(state): State<Arc<AppState>>,
@@ -68,4 +66,23 @@ pub async fn handle_search(
             message_ids: all_message_ids
         }]
     })
+}
+
+
+
+pub async fn handle_index(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<IndexAPIRequest>,
+) -> impl IntoResponse {
+    // Инициализируем пайплайн
+    let pipeline = IndexingPipeline::new(state);
+
+    // Запускаем процесс: Эмбеддинг -> Qdrant
+    match pipeline.run(payload.data).await {
+        Ok(_) => (axum::http::StatusCode::OK, "Data indexed successfully").into_response(),
+        Err(e) => {
+            eprintln!("Indexing error: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+        }
+    }
 }

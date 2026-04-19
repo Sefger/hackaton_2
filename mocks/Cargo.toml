@@ -1,0 +1,25 @@
+[package]
+name = "mocks"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[bin]]
+name = "mock_dense"
+path = "src/bin/mock_dense.rs"
+
+[[bin]]
+name = "mock_rerank"
+path = "src/bin/mock_rerank.rs"
+
+[lib]
+path = "src/lib.rs"

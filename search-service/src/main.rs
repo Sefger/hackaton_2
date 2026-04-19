@@ -1,84 +1,66 @@
-mod pipeline;
-
-use axum::{
-    extract::State,
-    routing::{get, post},
-    Json, Router,
-};
-use qdrant_client::Qdrant;
-use shared::{SearchAPIRequest, SearchAPIResponse};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-// Единая структура состояния приложения
-pub struct AppState {
-    pub qdrant: Qdrant,
-    pub http_client: reqwest::Client,
-    pub api_key: String,
-    pub dense_url: String,
-    pub reranker_url: String,
-    pub collection_name: String,
+use axum::{routing::{get, post}, Router};
+use fastembed::{SparseInitOptions, SparseModel, SparseTextEmbedding};
+use qdrant_client::Qdrant;
+use tokio::sync::Mutex;
+
+use search_service::config::Config;
+use search_service::handlers;
+use search_service::retrieval::qdrant::{QdrantStore, VectorStore};
+use search_service::state::AppState;
+
+fn init_sparse_model(model_dir: std::path::PathBuf) -> SparseTextEmbedding {
+    let mut options = SparseInitOptions::default();
+    options.model_name = SparseModel::BGEM3;
+    options.cache_dir = model_dir;
+    options.show_download_progress = false;
+    SparseTextEmbedding::try_new(options)
+        .expect("Failed to init sparse model; ensure MODEL_DIR has weights")
 }
 
 #[tokio::main]
 async fn main() {
-    // Инициализация логов (tracing)
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
+        )
+        .init();
 
-    // Читаем переменные окружения
-    // Используем .expect(), так как без этих данных сервис бесполезен на хакатоне
-    let api_key = std::env::var("API_KEY").expect("API_KEY not set");
-    let qdrant_url = std::env::var("QDRANT_URL").expect("QDRANT_URL not set");
-    let dense_url = std::env::var("EMBEDDINGS_DENSE_URL").expect("EMBEDDINGS_DENSE_URL not set");
-    let reranker_url = std::env::var("RERANKER_URL").expect("RERANKER_URL not set");
-    let collection_name =
-        std::env::var("QDRANT_COLLECTION_NAME").expect("QDRANT_COLLECTION_NAME not set");
+    let cfg = Arc::new(Config::from_env());
+    tracing::info!(?cfg, "starting search-service");
 
-    // Инициализация клиента Qdrant
-    // В версии qdrant-client 1.10+ используется .api_key()
-    let qdrant = Qdrant::from_url(&qdrant_url)
-        .api_key(api_key.clone())
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(55))
         .build()
-        .expect("Failed to create Qdrant client");
+        .expect("http client");
 
-    let state = Arc::new(AppState {
-        qdrant,
-        http_client: reqwest::Client::new(),
-        api_key,
-        dense_url,
-        reranker_url,
-        collection_name,
+    let sparse_model = init_sparse_model(cfg.model_dir.clone());
+    let sparse = Arc::new(Mutex::new(sparse_model));
+
+    let qdrant = Qdrant::from_url(&cfg.qdrant_url)
+        .api_key(cfg.api_key.clone())
+        .build()
+        .expect("qdrant client");
+
+    let store: Arc<dyn VectorStore> = Arc::new(QdrantStore {
+        client: qdrant,
+        collection: cfg.collection.clone(),
+        dense_vec_name: cfg.dense_vec_name.clone(),
+        sparse_vec_name: cfg.sparse_vec_name.clone(),
     });
 
-    // Настройка роутера
+    let state = AppState { cfg: cfg.clone(), http, sparse, store };
+
     let app = Router::new()
-        .route("/health", get(|| async { "OK" }))
-        .route("/search", post(search_handler))
+        .route("/health", get(handlers::health::health))
+        .route("/search", post(handlers::search::handle_search))
         .with_state(state);
 
-    // Настройка адреса запуска
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse()
-        .expect("PORT must be a number");
-
-    let addr: SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .expect("Invalid address format");
-
-    println!("🚀 Search Service starting on {}", addr);
-
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-}
-
-// Исправленный хендлер: теперь он просто делегирует задачу пайплайну
-async fn search_handler(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<SearchAPIRequest>,
-) -> Json<SearchAPIResponse> {
-    // Вызываем логику из mod pipeline
-    let results = pipeline::execute_search_pipeline(state, payload.question).await;
-    Json(results)
+    let addr: SocketAddr = format!("{}:{}", cfg.host, cfg.port).parse().expect("addr");
+    tracing::info!(%addr, "listening");
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    axum::serve(listener, app).await.expect("serve");
 }

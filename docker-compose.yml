@@ -1,13 +1,30 @@
-version: '3.8'
-
 services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant
     ports:
       - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  mock-dense:
+    build:
+      context: .
+      dockerfile: mocks/Dockerfile.dense
+    container_name: mock-dense
+    ports:
+      - "9001:9001"
+    restart: unless-stopped
+
+  mock-rerank:
+    build:
+      context: .
+      dockerfile: mocks/Dockerfile.rerank
+    container_name: mock-rerank
+    ports:
+      - "9002:9002"
     restart: unless-stopped
 
   index-service:
@@ -18,12 +35,26 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - HOST=0.0.0.0
-      - PORT=8080
-      - RUST_LOG=info
+      HOST: 0.0.0.0
+      PORT: 8080
+      RUST_LOG: info
+      MODEL_DIR: /app/models
     depends_on:
       - qdrant
     restart: unless-stopped
+
+  qdrant-init:
+    image: curlimages/curl:latest
+    container_name: qdrant-init
+    depends_on:
+      - qdrant
+    volumes:
+      - ./scripts/seed:/scripts:ro
+    entrypoint: ["/bin/sh", "/scripts/init_qdrant.sh"]
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      COLLECTION: messages
+    restart: "no"
 
   search-service:
     build:
@@ -33,21 +64,41 @@ services:
     ports:
       - "8082:8080"
     environment:
-      - HOST=0.0.0.0
-      - PORT=8080
-      - RUST_LOG=info
-      # Заглушки для локальной разработки
-      - QDRANT_URL=http://qdrant:6333
-      - QDRANT_COLLECTION_NAME=test_collection
-      - EMBEDDINGS_DENSE_URL=http://placeholder
-      - RERANKER_URL=http://placeholder
-      - API_KEY=dummy
-      - QDRANT_DENSE_VECTOR_NAME=dense
-      - QDRANT_SPARSE_VECTOR_NAME=sparse
+      HOST: 0.0.0.0
+      PORT: 8080
+      RUST_LOG: info
+      MODEL_DIR: /app/models
+      API_KEY: dev-key
+      QDRANT_URL: http://qdrant:6334
+      QDRANT_COLLECTION_NAME: messages
+      EMBEDDINGS_DENSE_URL: http://mock-dense:9001/embeddings
+      RERANKER_URL: http://mock-rerank:9002/rerank
+      QDRANT_DENSE_VECTOR_NAME: dense
+      QDRANT_SPARSE_VECTOR_NAME: sparse
     depends_on:
       - qdrant
-      - index-service
+      - mock-dense
+      - mock-rerank
+      - qdrant-init
     restart: unless-stopped
+
+  seed-data:
+    image: python:3.12-alpine
+    container_name: seed-data
+    depends_on:
+      - index-service
+      - qdrant-init
+    volumes:
+      - ./scripts/seed:/scripts:ro
+      - ./test_index.json:/data/test_index.json:ro
+    entrypoint: ["/bin/sh", "/scripts/seed_data.sh"]
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      COLLECTION: messages
+      INDEX_SERVICE_URL: http://index-service:8080
+      DENSE_URL: http://mock-dense:9001/embeddings
+      INPUT_JSON: /data/test_index.json
+    restart: "no"
 
   frontend:
     build:
@@ -56,8 +107,9 @@ services:
     container_name: frontend
     ports:
       - "3000:3000"
+    environment:
+      PUBLIC_SEARCH_API_URL: http://localhost:8082
     depends_on:
-      - index-service
       - search-service
     restart: unless-stopped
 

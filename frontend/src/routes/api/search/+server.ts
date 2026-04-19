@@ -1,61 +1,47 @@
 import {json} from "@sveltejs/kit"
 import type {RequestHandler} from "./$types"
+import {env} from "$env/dynamic/private"
+
+const SEARCH_API_URL = env.PUBLIC_SEARCH_API_URL ?? "http://search-service:8080"
 
 export const GET: RequestHandler = async ({url}) => {
-  const query = url.searchParams.get("q")?.toLowerCase() || ""
+  const query = url.searchParams.get("q") ?? ""
 
-  // Имитация базы данных/результатов от Rust
-  const allResults = [
-    {
-      id: "1",
-      type: "document",
-      title: "Годовой отчет 2023.pdf",
-      description: "Полная финансовая аналитика за прошлый год",
-      metadata: {size: "15.4 MB", author: "Finance Dept"},
+  const payload = {
+    question: {
+      text: query,
+      asker: "",
+      asked_on: "",
+      variants: [],
+      hyde: [],
+      keywords: [],
+      entities: {people: [], emails: [], documents: [], names: [], links: []},
+      date_mentions: [],
+      date_range: null,
+      search_text: query,
     },
-    {
-      id: "2",
-      type: "person",
-      title: "Александр Пушкин",
-      description: "Senior Rust Developer",
-      metadata: {
-        department: "Core Infrastructure",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Alex",
-      },
-    },
-    {
-      id: "3",
-      type: "document",
-      title: "Инструкция по безопасности.docx",
-      description: "Важные правила работы в офисе",
-      metadata: {size: "1.2 MB"},
-    },
-    {
-      id: "4",
-      type: "person",
-      title: "Мария Кюри",
-      description: "Lead Research Scientist",
-      metadata: {
-        department: "R&D",
-        avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=Maria",
-      },
-    },
-    {
-      id: "5",
-      type: "app",
-      title: "Jira Dashboard",
-      description: "Система управления задачами проекта",
-      metadata: {url: "https://jira.company.com"},
-    },
-  ]
+  }
 
-  // Простая фильтрация для теста
-  const filtered = allResults.filter(
-    (item) => item.title.toLowerCase().includes(query) || item.description.toLowerCase().includes(query)
-  )
-
-  // Имитируем небольшую задержку от Rust-кластера
-  await new Promise((resolve) => setTimeout(resolve, 400))
-
-  return json(filtered)
+  try {
+    const res = await fetch(`${SEARCH_API_URL}/search`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      return json({error: `search ${res.status}`, results: []}, {status: res.status})
+    }
+    const data = await res.json()
+    const messageIds: string[] = data?.results?.[0]?.message_ids ?? []
+    const items = messageIds.map((id) => ({
+      id,
+      type: "message",
+      title: `Message ${id}`,
+      description: "",
+      metadata: {},
+    }))
+    return json(items)
+  } catch (err) {
+    return json({error: String(err), results: []}, {status: 502})
+  }
 }
